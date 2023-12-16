@@ -14,13 +14,13 @@ func GetMetrics() *Metrics {
 
 	metrics := &Metrics{
 		Time: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "Time",
+			Name:    "Time_Req",
 			Help:    "Request work time.",
 			Buckets: prometheus.LinearBuckets(0, 100, 6),
 		}, description),
-
+ 
 		Hits: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "Hits",
+			Name: "Hits_Req",
 			Help: "Step",
 		}, description),
 	}

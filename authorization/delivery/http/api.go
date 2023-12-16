@@ -13,21 +13,24 @@ import (
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/authorization/usecase"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/middleware"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/pkg/requests"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type IApi interface {
 	SendResponse(w http.ResponseWriter, response requests.Response)
 	Signin(w http.ResponseWriter, r *http.Request)
+	SigninResponse(w http.ResponseWriter, r *http.Request)
 	Signup(w http.ResponseWriter, r *http.Request)
 	LogoutSession(w http.ResponseWriter, r *http.Request)
 	AuthAccept(w http.ResponseWriter, r *http.Request)
 }
 
 type API struct {
-	core       usecase.ICore
-	lg         *slog.Logger
-	mx         *http.ServeMux
-	middleware *middleware.Middleware
+	core usecase.ICore
+	lg   *slog.Logger
+	mx   *http.ServeMux
+	mw   *middleware.ResponseMiddleware
 }
 
 func (a *API) ListenAndServe() error {
@@ -40,22 +43,28 @@ func (a *API) ListenAndServe() error {
 	return nil
 }
 
-func GetApi(c *usecase.Core, l *slog.Logger, m *middleware.Middleware) *API {
-	api := &API{
-		core:       c,
-		lg:         l.With("module", "api"),
-		mx:         &http.ServeMux{},
-		middleware: m,
-	}
-	mx := http.NewServeMux()
-	mx.HandleFunc("/signup", api.Signup)
-	mx.HandleFunc("/signin", api.Signin)
-	mx.HandleFunc("/logout", api.LogoutSession)
-	mx.HandleFunc("/authcheck", api.AuthAccept)
-	mx.HandleFunc("/api/v1/csrf", api.GetCsrfToken)
-	mx.HandleFunc("/api/v1/settings", api.Profile)
+func GetApi(c *usecase.Core, l *slog.Logger) *API {
+    resp := &requests.Response{
+        Status: http.StatusOK,
+        Body:   nil,
+    }
+    middleware := &middleware.ResponseMiddleware{
+        Response: resp,
+    }
+    api := &API{
+        core: c,
+        lg:   l.With("module", "api"),
+        mx:   http.NewServeMux(),
+        mw:   middleware,
+    }
 
-	api.mx = mx
+	api.mx.Handle("/metrics", promhttp.Handler())
+	api.mx.Handle("/signin", api.mw.GetResponse(http.HandlerFunc(api.Signin), l))
+	api.mx.HandleFunc("/signup", api.Signup)
+	api.mx.HandleFunc("/logout", api.LogoutSession)
+	api.mx.HandleFunc("/authcheck", api.AuthAccept)
+	api.mx.HandleFunc("/api/v1/csrf", api.GetCsrfToken)
+	api.mx.HandleFunc("/api/v1/settings", api.Profile)
 
 	return api
 }
@@ -124,10 +133,8 @@ func (a *API) AuthAccept(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
-	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodPost {
-		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		a.mw.Response.Status = http.StatusMethodNotAllowed
 		return
 	}
 
@@ -136,8 +143,7 @@ func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
 	_, err := a.core.CheckCsrfToken(r.Context(), csrfToken)
 	if err != nil {
 		w.Header().Set("X-CSRF-Token", "null")
-		response.Status = http.StatusPreconditionFailed
-		requests.SendResponse(w, response, a.lg)
+		a.mw.Response.Status = http.StatusPreconditionFailed
 		return
 	}
 
@@ -145,27 +151,23 @@ func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		a.mw.Response.Status = http.StatusBadRequest
 		return
 	}
 
 	if err = json.Unmarshal(body, &request); err != nil {
-		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		a.mw.Response.Status = http.StatusBadRequest
 		return
 	}
 
 	user, found, err := a.core.FindUserAccount(request.Login, request.Password)
 	if err != nil {
 		a.lg.Error("Signin error", "err", err.Error())
-		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		a.mw.Response.Status = http.StatusInternalServerError
 		return
 	}
 	if !found {
-		response.Status = http.StatusUnauthorized
-		requests.SendResponse(w, response, a.lg)
+		a.mw.Response.Status = http.StatusUnauthorized
 		return
 	} else {
 		sid, session, _ := a.core.CreateSession(r.Context(), user.Login)
@@ -178,9 +180,6 @@ func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
 		}
 		http.SetCookie(w, cookie)
 	}
-	metricsHandler := a.middleware.GetMetrics(http.HandlerFunc(a.Signup), http.StatusOK)
-	metricsHandler.ServeHTTP(w, r)
-	requests.SendResponse(w, response, a.lg)
 }
 
 func (a *API) Signup(w http.ResponseWriter, r *http.Request) {
