@@ -61,7 +61,7 @@ func GetApi(c *usecase.Core, l *slog.Logger) *API {
 	api.mx.Handle("/metrics", promhttp.Handler())
 	api.mx.Handle("/signin", api.mw.GetResponse(http.HandlerFunc(api.Signin), l))
 	api.mx.HandleFunc("/signup", api.Signup)
-	api.mx.HandleFunc("/logout", api.LogoutSession)
+	api.mx.Handle("/logout", api.mw.GetResponse(http.HandlerFunc(api.Signin), l))
 	api.mx.HandleFunc("/authcheck", api.AuthAccept)
 	api.mx.HandleFunc("/api/v1/csrf", api.GetCsrfToken)
 	api.mx.HandleFunc("/api/v1/settings", api.Profile)
@@ -70,19 +70,17 @@ func GetApi(c *usecase.Core, l *slog.Logger) *API {
 }
 
 func (a *API) LogoutSession(w http.ResponseWriter, r *http.Request) {
-	response := requests.Response{Status: http.StatusOK, Body: nil}
+	a.mw.Response = &requests.Response{Status: http.StatusOK, Body: nil}
 
 	session, err := r.Cookie("session_id")
 	if err == http.ErrNoCookie {
-		response.Status = http.StatusUnauthorized
-		requests.SendResponse(w, response, a.lg)
+		a.mw.Response.Status = http.StatusUnauthorized
 		return
 	}
 
 	found, _ := a.core.FindActiveSession(r.Context(), session.Value)
 	if !found {
-		response.Status = http.StatusUnauthorized
-		requests.SendResponse(w, response, a.lg)
+		a.mw.Response.Status = http.StatusUnauthorized
 		return
 	} else {
 		err := a.core.KillSession(r.Context(), session.Value)
@@ -92,8 +90,6 @@ func (a *API) LogoutSession(w http.ResponseWriter, r *http.Request) {
 		session.Expires = time.Now().AddDate(0, 0, -1)
 		http.SetCookie(w, session)
 	}
-
-	requests.SendResponse(w, response, a.lg)
 }
 
 func (a *API) AuthAccept(w http.ResponseWriter, r *http.Request) {
@@ -133,6 +129,7 @@ func (a *API) AuthAccept(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
+	a.mw.Response = &requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodPost {
 		a.mw.Response.Status = http.StatusMethodNotAllowed
 		return
