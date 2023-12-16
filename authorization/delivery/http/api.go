@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/authorization/usecase"
+	"github.com/go-park-mail-ru/2023_2_Vkladyshi/metrics"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/middleware"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/pkg/requests"
 
@@ -50,6 +51,7 @@ func GetApi(c *usecase.Core, l *slog.Logger) *API {
     }
     middleware := &middleware.ResponseMiddleware{
         Response: resp,
+		Metrix: metrics.GetMetrics(),
     }
     api := &API{
         core: c,
@@ -61,7 +63,7 @@ func GetApi(c *usecase.Core, l *slog.Logger) *API {
 	api.mx.Handle("/metrics", promhttp.Handler())
 	api.mx.Handle("/signin", api.mw.GetResponse(http.HandlerFunc(api.Signin), l))
 	api.mx.HandleFunc("/signup", api.Signup)
-	api.mx.Handle("/logout", api.mw.GetResponse(http.HandlerFunc(api.Signin), l))
+	api.mx.Handle("/logout", api.mw.GetResponse(http.HandlerFunc(api.LogoutSession), l))
 	api.mx.HandleFunc("/authcheck", api.AuthAccept)
 	api.mx.HandleFunc("/api/v1/csrf", api.GetCsrfToken)
 	api.mx.HandleFunc("/api/v1/settings", api.Profile)

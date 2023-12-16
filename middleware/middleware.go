@@ -13,6 +13,7 @@ import (
 
 type ResponseMiddleware struct {
 	Response *requests.Response
+	Metrix   *metrics.Metrics
 }
 
 func (mw *ResponseMiddleware) GetResponse(next http.Handler, lg *slog.Logger) http.Handler {
@@ -21,9 +22,8 @@ func (mw *ResponseMiddleware) GetResponse(next http.Handler, lg *slog.Logger) ht
         next.ServeHTTP(w, r)
         requests.SendResponse(w, *mw.Response, lg)
 		end := time.Since(start)
-		mt := metrics.GetMetrics()
-		mt.Time.WithLabelValues(strconv.Itoa(mw.Response.Status), r.URL.Path).Observe(end.Seconds())
+		mw.Metrix.Time.WithLabelValues(strconv.Itoa(mw.Response.Status), r.URL.Path).Observe(end.Seconds())
 
-        mt.Hits.WithLabelValues(strconv.Itoa(mw.Response.Status), r.URL.Path).Inc()
+        mw.Metrix.Hits.WithLabelValues(strconv.Itoa(mw.Response.Status), r.URL.Path).Inc()
     })
 }
